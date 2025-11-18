@@ -174,7 +174,7 @@ def optimize():
             storage_base = (demand_range * 6.0) / module_capacity_mwh
 
             # Try multiple storage configurations
-            storage_multipliers = [0.0, 0.1, 0.2, 0.28, 0.3, 0.35, 0.4, 0.5, 1.0, 1.5, 2.0]
+            storage_multipliers = [0.0, 0.1, 0.2, 0.3,0.4, 0.5, 1.0]
 
             for multiplier in storage_multipliers:
                 n_storage_fixed = max(0, int(storage_base * multiplier))
