@@ -182,17 +182,17 @@ def optimize_smr(
         study = optuna.load_study(study_name=study_name, storage=storage)
 
     # Print results
-    print("\n" + "=" * 80)
-    print("Optimization Results")
-    print("=" * 80)
-    print(f"Total trials completed: {len(study.trials)}")
-    print(f"Best trial: {study.best_trial.number}")
+    # print("\n" + "=" * 80)
+    # print("Optimization Results")
+    # print("=" * 80)
+    # print(f"Total trials completed: {len(study.trials)}")
+    # print(f"Best trial: {study.best_trial.number}")
     print(f"Best value (annual profit): €{study.best_value:,.2f}")
-    print("\nBest parameters:")
-    for key, value in study.best_params.items():
-        if key.startswith("prod_") or key.startswith("soc_"):
-            continue  # Skip hourly values for brevity
-        print(f"  {key}: {value}")
+    # print("\nBest parameters:")
+    # for key, value in study.best_params.items():
+    #     if key.startswith("prod_") or key.startswith("soc_"):
+    #         continue  # Skip hourly values for brevity
+    #     print(f"  {key}: {value}")
 
     # Extract and validate best solution
     best_params = study.best_params
@@ -206,11 +206,11 @@ def optimize_smr(
     x_best = x_from_var(reactor_model, n_reactor, n_storage, reactor_production, soc)
     residuals = constraints_residuals(x_best)
 
-    print(f"\nReactor model: {reactor_model} ({reactor_models[reactor_model]} MW)")
-    print(f"Number of reactors: {n_reactor}")
-    print(f"Number of storage modules: {n_storage}")
-    print(f"Constraint satisfaction (min residual): {min(residuals):.6f}")
-    print(f"Feasible: {min(residuals) >= -1e-6}")
+    # print(f"\nReactor model: {reactor_model} ({reactor_models[reactor_model]} MW)")
+    # print(f"Number of reactors: {n_reactor}")
+    # print(f"Number of storage modules: {n_storage}")
+    # print(f"Constraint satisfaction (min residual): {min(residuals):.6f}")
+    # print(f"Feasible: {min(residuals) >= -1e-6}")
 
     return study
 

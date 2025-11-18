@@ -193,7 +193,7 @@ def objective(x: np.ndarray) -> float:
     annual_fixed_om += cap_storage * storage_fixed_om_frac
 
     # Fuel cost
-    fuel_cost = np.sum(reactor_production) * fuel_price
+    fuel_cost = np.sum(reactor_production) * fuel_price * 365
 
     # Market interactions (daily)
     ch, dis = compute_charge_discharge(soc)

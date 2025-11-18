@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import numpy as np
 import optuna
 from optuna.samplers import TPESampler
+from sklearn.mixture import GaussianMixture
 
 from minlp_smr_battery_storage import (
     constraints_residuals,
@@ -35,16 +36,49 @@ from minlp_smr_battery_storage import (
 )
 
 
-def create_objective_function(penalty_weight=1e8):
+def analyze_demand_with_gmm(demand, n_components=3):
+    """
+    Analyze demand patterns using Gaussian Mixture Model.
+
+    Args:
+        demand: Array of hourly electricity demand
+        n_components: Number of demand components to identify
+
+    Returns:
+        Dictionary with GMM model and demand classifications
+    """
+    # Reshape for GMM: treat each hour as a sample with demand as feature
+    X = demand.reshape(-1, 1)
+
+    gmm = GaussianMixture(n_components=n_components, random_state=42, n_init=10)
+    gmm.fit(X)
+    labels = gmm.predict(X)
+
+    # Sort components by mean demand
+    sorted_idx = np.argsort(gmm.means_.flatten())
+
+    return {
+        "model": gmm,
+        "labels": labels,
+        "means": gmm.means_.flatten()[sorted_idx],
+        "weights": gmm.weights_[sorted_idx],
+        "sorted_idx": sorted_idx,
+    }
+
+
+def create_objective_function(penalty_weight=1e8, demand_gmm=None):
     """
     Create an objective function for Optuna that includes constraint penalties.
 
     Args:
         penalty_weight: Weight for constraint violations
+        demand_gmm: Pre-computed GMM analysis of demand patterns
 
     Returns:
         Objective function for Optuna to maximize
     """
+    if demand_gmm is None:
+        demand_gmm = analyze_demand_with_gmm(electric_demand)
 
     def optuna_objective(trial: optuna.Trial) -> float:
         # Suggest discrete variables
@@ -57,26 +91,36 @@ def create_objective_function(penalty_weight=1e8):
         max_storage_energy = n_storage * module_capacity_mwh
         max_storage_power = n_storage * module_power_mw
 
-        # Suggest variability smoothness (0 = follow demand, 1 = flat production)
-        variability_smoothness = trial.suggest_float("variability_smoothness", 0.0, 1.0)
+        # Suggest demand-following parameter
+        demand_follow = trial.suggest_float("demand_follow", 0.0, 1.0)
 
-        # Build initial heuristic profile
+        # Build GMM-informed heuristic profile
         demand = electric_demand.copy()
-        avg = np.mean(demand)
+        avg_demand = np.mean(demand)
 
-        # Smooth reactor profile: weighted average between demand and flat profile
-        reactor_base = (
-            variability_smoothness * np.full(horizon, avg) + (1 - variability_smoothness) * demand
-        )
+        # Use GMM means as anchors: blend between low, medium, and high demand tracking
+        gmm_low = demand_gmm["means"][0]
+        gmm_high = demand_gmm["means"][-1]
+
+        # Production strategy: follow demand more during high-demand hours
+        reactor_base = np.zeros(horizon)
+        for t in range(horizon):
+            if demand[t] > (gmm_low + gmm_high) / 2:
+                # High-demand period: follow demand more
+                reactor_base[t] = demand_follow * demand[t] + (1 - demand_follow) * avg_demand
+            else:
+                # Low-demand period: smoother production
+                reactor_base[t] = (1 - demand_follow) * demand[t] + demand_follow * avg_demand
+
         reactor_base = np.clip(reactor_base, 0, plant_capacity)
 
-        # Allow Optuna to refine around the heuristic
+        # Allow Optuna to refine around the heuristic with GMM-informed bounds
         reactor_production = np.array(
             [
                 trial.suggest_float(
                     f"prod_{t}",
-                    max(0.0, reactor_base[t] - 0.2 * plant_capacity),
-                    min(plant_capacity, reactor_base[t] + 0.2 * plant_capacity),
+                    max(0.0, reactor_base[t] - 0.15 * plant_capacity),
+                    min(plant_capacity, reactor_base[t] + 0.15 * plant_capacity),
                 )
                 for t in range(horizon)
             ]
@@ -114,8 +158,8 @@ def create_objective_function(penalty_weight=1e8):
             [
                 trial.suggest_float(
                     f"soc_{t}",
-                    max(0.0, soc[t] - 0.3 * max_storage_energy),
-                    min(max_storage_energy, soc[t] + 0.3 * max_storage_energy),
+                    max(0.0, soc[t] - 0.25 * max_storage_energy),
+                    min(max_storage_energy, soc[t] + 0.25 * max_storage_energy),
                 )
                 for t in range(horizon)
             ]
@@ -127,14 +171,16 @@ def create_objective_function(penalty_weight=1e8):
         # Compute objective (annual profit)
         profit = objective(x)
 
-        # Compute constraint violations
+        # Compute constraint violations with adaptive penalty
         residuals = constraints_residuals(x)
         min_residual = min(residuals)
 
-        # Apply penalty for constraint violations
+        # Apply adaptive penalty based on violation severity
         if min_residual < 0:
-            penalty = penalty_weight * abs(min_residual)
-            return profit - penalty
+            # Scale penalty based on how severe the violation is
+            violation_severity = abs(min_residual) / (1.0 + abs(min_residual))
+            adaptive_penalty = penalty_weight * violation_severity
+            return profit - adaptive_penalty
 
         return profit
 
@@ -187,6 +233,13 @@ def optimize_smr(
     Returns:
         Optimized study object
     """
+    # Pre-compute demand GMM analysis
+    demand_gmm = analyze_demand_with_gmm(electric_demand, n_components=3)
+    print(f"Demand GMM analysis: {len(demand_gmm['means'])} components")
+    print(f"  Low demand: {demand_gmm['means'][0]:.2f} MW")
+    print(f"  Mid demand: {demand_gmm['means'][1]:.2f} MW")
+    print(f"  High demand: {demand_gmm['means'][-1]:.2f} MW")
+
     # Determine number of workers
     if n_jobs == -1:
         n_workers = mp.cpu_count()
@@ -195,7 +248,7 @@ def optimize_smr(
     else:
         n_workers = max(1, n_jobs)
 
-    print(f"Running optimization with {n_workers} parallel workers on {mp.cpu_count()} CPUs")
+    print(f"\nRunning optimization with {n_workers} parallel workers on {mp.cpu_count()} CPUs")
     print(f"Total trials: {n_trials}")
 
     # Create storage
@@ -216,11 +269,12 @@ def optimize_smr(
 
     if n_workers == 1:
         # Single process optimization
-        obj_func = create_objective_function()
+        obj_func = create_objective_function(demand_gmm=demand_gmm)
         print(f"Starting optimization with {n_trials} trials...")
         study.optimize(obj_func, n_trials=n_trials, show_progress_bar=True)
     else:
         # Multi-process optimization
+        # Note: demand_gmm cannot be pickled directly, recompute in workers
         processes = []
         for i in range(n_workers):
             worker_trials = trials_per_worker + (1 if i < remaining_trials else 0)
