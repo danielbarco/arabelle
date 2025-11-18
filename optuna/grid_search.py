@@ -24,14 +24,14 @@ from minlp_smr_battery_storage import (
 def compute_cyclical_initial_guess(demand, plant_cap, n_storage):
     """
     Compute initial guess for production and SOC that respects daily cyclical nature.
-    
-    Key insight: For a sustainable daily cycle, the battery must return to its 
+
+    Key insight: For a sustainable daily cycle, the battery must return to its
     starting state after 24 hours. This requires the total energy charged equals
     total energy discharged (accounting for losses).
     """
     max_storage_energy = n_storage * module_capacity_mwh
     max_storage_power = n_storage * module_power_mw
-    
+
     # Step 1: Compute base production profile using demand smoothing
     # Use exponential weighted moving average for smoother transitions
     alpha = 0.3  # Smoothing factor
@@ -42,38 +42,38 @@ def compute_cyclical_initial_guess(demand, plant_cap, n_storage):
             t_prev = (t - 1) % horizon
             t_next = (t + 1) % horizon
             demand_smoothed_new[t] = (
-                alpha * demand_smoothed[t_prev] +
-                (1 - 2*alpha) * demand_smoothed[t] +
-                alpha * demand_smoothed[t_next]
+                alpha * demand_smoothed[t_prev]
+                + (1 - 2 * alpha) * demand_smoothed[t]
+                + alpha * demand_smoothed[t_next]
             )
         demand_smoothed = demand_smoothed_new
-    
+
     # Clip to reactor capacity
     prod_guess = np.clip(demand_smoothed, 0, plant_cap)
-    
+
     # Step 2: Iteratively adjust production and SOC to achieve periodicity
     # We need: SOC[0] ≈ SOC[horizon] for daily cycling
     if n_storage == 0:
         return prod_guess, np.zeros(horizon)
-    
+
     # Target SOC level (middle of range for flexibility)
     target_soc = 0.5 * max_storage_energy
-    
+
     # Iterative refinement (5 iterations usually enough)
     for iteration in range(5):
         soc = np.zeros(horizon)
         soc[0] = target_soc
-        
+
         # Forward simulate the battery dynamics
         total_charge = 0
         total_discharge = 0
-        
+
         for t in range(horizon):
             t_next = (t + 1) % horizon
-            
+
             # Compute energy mismatch
             mismatch = prod_guess[t] - demand[t]
-            
+
             if mismatch > 0:
                 # Surplus -> charge battery
                 charge_power = min(mismatch, max_storage_power)
@@ -84,15 +84,17 @@ def compute_cyclical_initial_guess(demand, plant_cap, n_storage):
                 discharge_power = min(-mismatch, max_storage_power)
                 discharge_power = min(discharge_power, soc[t])
                 charge_power = 0
-            
+
             total_charge += charge_power
             total_discharge += discharge_power
-            
+
             # Update SOC for next timestep
             if t < horizon - 1:
-                soc[t + 1] = soc[t] * (1 - storage_leakage_per_hour) + charge_power - discharge_power
+                soc[t + 1] = (
+                    soc[t] * (1 - storage_leakage_per_hour) + charge_power - discharge_power
+                )
                 soc[t + 1] = np.clip(soc[t + 1], 0, max_storage_energy)
-        
+
         # Check periodicity: what would SOC be if we wrapped around?
         final_mismatch = prod_guess[-1] - demand[-1]
         if final_mismatch > 0:
@@ -101,30 +103,30 @@ def compute_cyclical_initial_guess(demand, plant_cap, n_storage):
         else:
             final_discharge = min(-final_mismatch, max_storage_power, soc[-1])
             final_charge = 0
-        
+
         soc_would_be = soc[-1] * (1 - storage_leakage_per_hour) + final_charge - final_discharge
-        
+
         # Adjust target SOC to improve periodicity
         soc_error = soc_would_be - target_soc
-        
+
         # If we're accumulating energy, we need to produce less or discharge more
         # Adjust production slightly to balance the cycle
         if abs(soc_error) > 0.01 * max_storage_energy:
             # Adjustment factor: spread the error across the day
             energy_imbalance = soc_error
             avg_adjustment = energy_imbalance / horizon
-            
+
             # Reduce production during high-production hours to fix accumulation
             prod_guess = prod_guess - avg_adjustment * 0.5
             prod_guess = np.clip(prod_guess, 0, plant_cap)
-            
+
             # Update target SOC for next iteration
             target_soc = target_soc - soc_error * 0.3
             target_soc = np.clip(target_soc, 0.2 * max_storage_energy, 0.8 * max_storage_energy)
         else:
             # Converged!
             break
-    
+
     return prod_guess, soc
 
 
@@ -172,7 +174,7 @@ def optimize():
             storage_base = (demand_range * 6.0) / module_capacity_mwh
 
             # Try multiple storage configurations
-            storage_multipliers = [0.0, 0.1, 0.2, 0.3, 0.5, 1.0, 1.5, 2.0]
+            storage_multipliers = [0.0, 0.1, 0.2, 0.28, 0.3, 0.35, 0.4, 0.5, 1.0, 1.5, 2.0]
 
             for multiplier in storage_multipliers:
                 n_storage_fixed = max(0, int(storage_base * multiplier))
