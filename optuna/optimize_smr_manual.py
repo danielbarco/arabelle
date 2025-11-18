@@ -24,6 +24,7 @@ from optuna.samplers import TPESampler
 
 from minlp_smr_battery_storage import (
     constraints_residuals,
+    electric_demand,
     horizon,
     module_capacity_mwh,
     module_power_mw,
@@ -54,19 +55,74 @@ def create_objective_function(penalty_weight=1e8):
         # Get reactor capacity
         plant_capacity = reactor_models[reactor_model] * n_reactor
         max_storage_energy = n_storage * module_capacity_mwh
+        max_storage_power = n_storage * module_power_mw
 
-        # Suggest reactor production for each hour
+        # Suggest variability smoothness (0 = follow demand, 1 = flat production)
+        variability_smoothness = trial.suggest_float("variability_smoothness", 0.0, 1.0)
+
+        # Build initial heuristic profile
+        demand = electric_demand.copy()
+        avg = np.mean(demand)
+
+        # Smooth reactor profile: weighted average between demand and flat profile
+        reactor_base = (
+            variability_smoothness * np.full(horizon, avg) + (1 - variability_smoothness) * demand
+        )
+        reactor_base = np.clip(reactor_base, 0, plant_capacity)
+
+        # Allow Optuna to refine around the heuristic
         reactor_production = np.array(
-            [trial.suggest_float(f"prod_{t}", 0.0, plant_capacity) for t in range(horizon)]
+            [
+                trial.suggest_float(
+                    f"prod_{t}",
+                    max(0.0, reactor_base[t] - 0.2 * plant_capacity),
+                    min(plant_capacity, reactor_base[t] + 0.2 * plant_capacity),
+                )
+                for t in range(horizon)
+            ]
         )
 
-        # Suggest state of charge for each hour
-        soc = np.array(
-            [trial.suggest_float(f"soc_{t}", 0.0, max_storage_energy) for t in range(horizon)]
+        # Initialize SOC using storage logic
+        soc = np.zeros(horizon)
+        soc[0] = 0.30 * max_storage_energy  # Start at 30% capacity
+
+        for t in range(horizon):
+            # Compute mismatch
+            mismatch = reactor_production[t] - demand[t]
+            if mismatch > 0:
+                # Surplus -> charge storage
+                available_power = min(mismatch, max_storage_power)
+                remaining_energy_cap = max_storage_energy - soc[t]
+                charge_power = min(available_power, remaining_energy_cap)
+                ch = charge_power
+                dis = 0.0
+            else:
+                # Deficit -> discharge storage
+                need = -mismatch
+                discharge_power = min(need, max_storage_power)
+                discharge_power = min(discharge_power, soc[t])
+                dis = discharge_power
+                ch = 0.0
+
+            # Compute next SOC
+            if t < horizon - 1:
+                soc_next = soc[t] * (1 - storage_leakage_per_hour) + ch - dis
+                soc[t + 1] = soc_next
+
+        # Allow Optuna to refine SOC around the heuristic
+        soc_refined = np.array(
+            [
+                trial.suggest_float(
+                    f"soc_{t}",
+                    max(0.0, soc[t] - 0.3 * max_storage_energy),
+                    min(max_storage_energy, soc[t] + 0.3 * max_storage_energy),
+                )
+                for t in range(horizon)
+            ]
         )
 
         # Create optimization vector
-        x = x_from_var(reactor_model, n_reactor, n_storage, reactor_production, soc)
+        x = x_from_var(reactor_model, n_reactor, n_storage, reactor_production, soc_refined)
 
         # Compute objective (annual profit)
         profit = objective(x)
