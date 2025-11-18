@@ -51,6 +51,17 @@ This *guarantees* you can't charge and discharge at the same time.
 
 ...And it *still* failed. The exact same behavior. Stuck on the heuristic, `Convergence: 0.0000`.
 
+--
+
+## Result
+
+Basically the same as the initial heuristic, so no improvement:
+
+--- Evaluating candidate 'Best Solution Found (Optimization Failed, Profit: 86,626,999.27 EUR/year)' ---
+Annual Profit (EUR): 86,626,999.27
+Min Inequality Residual (>=0 for feasibility): 0.0000
+Configuration: Model=2 (300.0 MW), N_Reactor=1, N_Storage=11
+
 ---
 
 ## Conclusion: The Unbeatable Manifold

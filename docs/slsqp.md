@@ -19,3 +19,11 @@ Our strategy overcomes this by decomposing the problem into two nested layers:
 4.  **Redefine Optimization Variables:** Initially, we tried to calculate SOC as a *result* of power flow. This was unstable for gradients. We decided to include `SOC` as an **explicit decision variable** in the vector ($x = [Prod, Charge, Discharge, SOC]$). We then used equality constraints to force the solver to align the `SOC` variables with the physics. This gave the solver the necessary mathematical "slack" to find the optimum.
 
 5.  **Optimization Scope (Daily vs. Annual):** To keep the inner solver numerically stable, we optimized for **Daily Operational Profit**. We effectively ignored the "365" multiplier inside the gradient calculations and only applied the annualized CAPEX and scaling factors in the final aggregation step.
+
+## Result
+
+Phase 1: Generating Grid of Integer Configurations...
+Phase 2: Evaluating 280 configurations using parallel processing...
+ Optimization Complete in 10.55 seconds.
+ Best Annual Profit: EUR 96,376,407.29
+ Best Config: Model index 2, 1 Reactors, 10 Storage Modules

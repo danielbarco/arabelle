@@ -21,19 +21,31 @@ A pure brute-force is impossible due to the 48 continuous variables. Our strateg
 
 This created a much larger and finer-grained search, allowing the script to find a significantly better (and still feasible) configuration.
 
-# Two-Stage "Top-K" Refinement Strategy
+### Result
 
-To overcome the trade-off between runtime and precision, the updated script implements a "Coarse-to-Fine" search strategy. Instead of treating every potential configuration equally, it uses a two-stage funnel to locate the Global Optimum efficiently.
+--- Evaluating candidate 'Brute Force Optimum
+Model=2, N_R=1, N_S=11 (Smooth=55%)' ---
+Annual Profit (EUR): 86,686,077.04
+Min Inequality Residual (>=0 for feasibility): 0.000000
 
-### 1. Stage 1: Ultra-Dense Grid Search (The "Wide Net")
-The script first scans the entire feasible solution space at a **coarse resolution**. This maps the profit landscape to identify promising regions ("basins of attraction") without wasting time on micro-optimizations.
-* **Reactors:** Scanned at **Step 1** (checking every count from 0 to 20).
-* **Storage:** Scanned at **Step 5** (checking 0, 5, 10... up to 400).
-* **Heuristics:** Uses **40** smoothness parameter steps per configuration.
-* **Goal:** Find the approximate hardware setups that yield high profits.
+
+# Two-Stage Multi-Variable Refinement Strategy
+
+To leverage increased compute power for exploring a higher-dimensional solution space, the updated script implements a "Coarse-to-Fine" search strategy across both hardware configuration and operational parameters.
+
+### 1. Stage 1: Multi-Variable Coarse Grid Search (The "Wide Net")
+The script first scans a significantly expanded feasible solution space at a **coarse resolution**. It maps the profit landscape to identify promising hardware regions ("basins of attraction") by testing them against a grid of operational strategies.
+* **Expanded Hardware Search:**
+    * **Reactors:** Scanned at **Step 1** (checking every count from 0 to 30).
+    * **Storage:** Scanned at **Step 10** (checking 0, 10, 20... up to 1000).
+* **3D Operational Grid:** Instead of a single heuristic line, the algorithm evaluates a Cartesian product of **3 variables** for every hardware setup:
+    1.  **Smoothness (10 steps):** Ranging from "Follow Demand" to "Flat Baseload."
+    2.  **Bias (4 steps):** Intentionally under-producing (0.9x) or over-producing (1.1x) relative to average demand.
+    3.  **Initial SOC (3 steps):** Optimizing the starting battery charge (Empty vs. Buffered).
+* **Goal:** Find the approximate hardware setups that yield high profits when paired with general operational strategies.
 
 ### 2. Selection: Diversity Filtering
-Simply taking the top 5 results from Stage 1 is risky; the top 5 results might all be identical hardware with negligible differences (e.g., storage=100 vs storage=105).
+To prevent the algorithm from getting stuck in a single local maximum, it filters the Stage 1 results to ensure diversity.
 * **Sorting:** The script sorts all Stage 1 results by profit.
 * **Filtering:** It selects the **Top 5 Distinct Hardware Configs**.
 * **Definition:** "Distinct" is defined as a unique combination of `(Reactor_Model, N_Reactors)`.
@@ -41,5 +53,15 @@ Simply taking the top 5 results from Stage 1 is risky; the top 5 results might a
 
 ### 3. Stage 2: Hyper-Refinement (The "Microscope")
 For each of the selected "seeds," the script performs a highly localized, high-precision search:
-* **Local Window:** It searches a narrow reactor range ($\pm 1$) and a wide storage range ($\pm 50$) around the seed to fill in the gaps left by the "Step 5" search in Stage 1.
-* **Extreme Granularity:** It tests **200** smoothness steps (up from 40) to find the exact operational balance between the reactor and storage.
+* **Local Window:** It searches a narrow reactor range ($\pm 1$) and a focused storage range ($\pm 20$) around the seed to fill in the gaps left by the "Step 10" search in Stage 1.
+* **Extreme Granularity:** It performs a fine-grained search on the operational variables:
+    * **Smoothness:** Increased to **50** steps.
+    * **Bias:** Refined to **10** steps (0.85x to 1.15x).
+    * **Initial SOC:** Refined to **5** steps (0% to 50%).
+* **Outcome:** This creates a massive search density around the most promising candidates to squeeze out the final fraction of profitability.
+
+### Result
+
+M=2, R=1, S=7' ---
+Annual Profit (EUR): 91,616,931.58
+Min Inequality Residual (>=0 for feasibility): 0.000000

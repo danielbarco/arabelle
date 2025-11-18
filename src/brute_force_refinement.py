@@ -3,24 +3,22 @@
 """
 © 2025, Arabelle Solutions and/or its affiliates. All rights reserved.
 
-This Python file is provided for experimentation only in the context of
-the AIM Week 2025 challenge.
-NO REPRESENTATION OR WARRANTY IS MADE OR IMPLIED AS TO ITS COMPLETENESS,
-ACCURACY, OR FITNESS FOR ANY PARTICULAR PURPOSE.
 MINLP sample: Nuclear SMR with battery storage modules.
+--- HIGH COMPUTE / MULTI-VARIABLE SEARCH VERSION ---
 
---- MODIFIED FOR ULTRA-GRANULAR TOP-K SEARCH ---
-1. STAGE 1: Very dense grid search (checking almost every integer).
-2. SELECTION: Selects the Top-5 DISTINCT best hardware configurations.
-3. STAGE 2: Refines all selected seeds + known heuristics.
+Changes from original:
+1. Expanded hardware search ranges (Storage -> 1000, Reactors -> 30).
+2. Added 'base_load_bias' variable: Determines if we target 90%, 100%, or 110% of avg demand.
+3. Added 'initial_soc' variable: Optimizes the starting battery charge.
+4. 3D Heuristic Grid Search (Smoothness x Bias x SOC).
 """
 
 import matplotlib.pyplot as plt
 import numpy as np
 import time
+import itertools
 
 # ------------------------- Problem data -------------------------------------
-# ... [Standard problem data - lines 20-305 remain identical] ...
 horizon = 24  # hourly horizon
 
 # Hourly electric demand (MW) - daily profile
@@ -201,20 +199,36 @@ def constraints_residuals(x: np.ndarray) -> list[float]:
     return res
 
 
-def build_candidate_with_storage(reactor_model: int, n_reactor: int, n_storage: int,
-                                 variability_smoothness: float) -> np.ndarray:
+# ----------------------------------------------------------------------------
+# UPDATED BUILD CANDIDATE: Accepts more variables
+# ----------------------------------------------------------------------------
+def build_candidate_with_storage(reactor_model: int,
+                                 n_reactor: int,
+                                 n_storage: int,
+                                 variability_smoothness: float,
+                                 base_load_bias: float,
+                                 initial_soc_frac: float) -> np.ndarray:
     demand = electric_demand.copy()
-    avg = np.mean(demand)
+
+    # --- Variable 1: Base Load Bias ---
+    # Allows the solver to intentionally target over-production (e.g. 1.1x) or under-production (0.9x)
+    avg = np.mean(demand) * base_load_bias
+
     reactor_production = (variability_smoothness * np.full(horizon, avg) + (1 - variability_smoothness) * demand)
     plant_capacity = reactor_models[reactor_model] * n_reactor
     reactor_production = np.clip(reactor_production, 0, plant_capacity)
+
     soc = np.zeros(horizon)
     max_power = n_storage * module_power_mw
     max_energy = n_storage * module_capacity_mwh
+
     if max_energy > 0:
-        soc_prev = 0.30 * max_energy
+        # --- Variable 2: Initial SOC ---
+        # Allows the solver to optimize the boundary condition
+        soc_prev = initial_soc_frac * max_energy
     else:
         soc_prev = 0.0
+
     for t in range(horizon):
         mismatch = reactor_production[t] - demand[t]
         ch_t, dis_t = 0.0, 0.0
@@ -229,6 +243,7 @@ def build_candidate_with_storage(reactor_model: int, n_reactor: int, n_storage: 
         soc[t] = soc_prev * (1 - storage_leakage_per_hour) + ch_t - dis_t
         soc[t] = np.clip(soc[t], 0, max_energy)
         soc_prev = soc[t]
+
     return x_from_var(reactor_model, n_reactor, n_storage, reactor_production, soc)
 
 
@@ -240,7 +255,6 @@ def build_candidate_wo_storage(reactor_model: int, n_reactor: int) -> np.ndarray
 
 
 def evaluate_candidate(cand, title):
-    # [Visualization function remains same as previous version]
     print(f"\n--- Evaluating candidate '{title}' ---")
     obj = objective(cand)
     res = constraints_residuals(cand)
@@ -282,86 +296,87 @@ def evaluate_candidate(cand, title):
     plt.tight_layout()
 
 
-# --- MODIFICATION: Function now returns list of all good candidates ---
+# --- MODIFIED: Function now handles the 3D operational parameter grid ---
 def run_search_grid(
         model_range,
         reactor_range,
         storage_range,
         smoothness_params,
+        bias_params,
+        init_soc_params,
         search_name="Search",
         return_all_results=False
 ):
-    """
-    Runs the brute-force search.
-    If return_all_results is True, returns a list of (profit, x) for analysis.
-    Otherwise returns tuple of best result.
-    """
     start_time = time.time()
-
-    # Store local best to print updates
     local_best_profit = -np.inf
     local_best_x = None
     local_best_title = ""
-
-    results = []  # List of (profit, x, model, nr, ns)
+    results = []
 
     model_list = list(model_range)
     reactor_list = list(reactor_range)
     storage_list = list(storage_range)
-    n_combinations = len(model_list) * len(reactor_list) * len(storage_list)
+
+    # Calculate total combinations for progress bar
+    n_hardware = len(model_list) * len(reactor_list) * len(storage_list)
+    n_heuristics = len(smoothness_params) * len(bias_params) * len(init_soc_params)
 
     print(f"\n--- Starting {search_name} ---")
-    print(f"Grid: {len(model_list)} models x {len(reactor_list)} reactor counts x {len(storage_list)} storage counts.")
-    print(f"Smoothness params per config: {len(smoothness_params)}")
-    print(f"Total iterations: {n_combinations:,}")
+    print(f"Hardware Grid: {len(model_list)} models x {len(reactor_list)} reactors x {len(storage_list)} storage.")
+    print(f"Operational Grid: {len(smoothness_params)} smooth x {len(bias_params)} bias x {len(init_soc_params)} soc.")
+    print(f"Total Combinations: {n_hardware * n_heuristics:,}")
 
     count = 0
+
+    # Create operational parameter grid (Cartesian product)
+    # This generates all combinations of (smoothness, bias, init_soc)
+    op_grid = list(itertools.product(smoothness_params, bias_params, init_soc_params))
+
     for model_idx in model_list:
         for n_r in reactor_list:
             for n_s in storage_list:
 
                 count += 1
-                if count % 2000 == 0 or count == n_combinations:
+                if count % 500 == 0:
                     elapsed = time.time() - start_time
-                    print(
-                        f"[{search_name}] {count:,}/{n_combinations:,} ({elapsed:.1f}s) Best: {local_best_profit:,.0f}")
+                    print(f"\r[{search_name}] HW Config {count}/{n_hardware} (Best: {local_best_profit:,.0f})", end="")
 
                 if n_r == 0 and n_s == 0: continue
 
-                # Evaluate this hardware config
                 current_config_best_profit = -np.inf
                 current_config_best_x = None
 
-                candidates_to_test = []
+                # If no storage, we only run once (heuristics don't apply/are simplified)
                 if n_s == 0:
-                    candidates_to_test.append((build_candidate_wo_storage(model_idx, n_r), "NoStorage"))
-                else:
-                    for s in smoothness_params:
-                        candidates_to_test.append((build_candidate_with_storage(model_idx, n_r, n_s, s), s))
-
-                # Find best heuristic for this hardware
-                for cand_x, param in candidates_to_test:
-                    if np.min(constraints_residuals(cand_x)) < -1e-6: continue
-                    profit = objective(cand_x)
-
-                    if profit > current_config_best_profit:
+                    cand_x = build_candidate_wo_storage(model_idx, n_r)
+                    if np.min(constraints_residuals(cand_x)) >= -1e-6:
+                        profit = objective(cand_x)
                         current_config_best_profit = profit
                         current_config_best_x = cand_x
+                else:
+                    # Check all operational combinations for this hardware setup
+                    for (sm, bi, iso) in op_grid:
+                        cand_x = build_candidate_with_storage(model_idx, n_r, n_s, sm, bi, iso)
 
-                # If we found a feasible solution for this hardware
+                        if np.min(constraints_residuals(cand_x)) < -1e-6: continue
+                        profit = objective(cand_x)
+
+                        if profit > current_config_best_profit:
+                            current_config_best_profit = profit
+                            current_config_best_x = cand_x
+
                 if current_config_best_profit > -np.inf:
                     if return_all_results:
                         results.append((current_config_best_profit, current_config_best_x, model_idx, n_r, n_s))
 
-                    # Update local tracking for print
                     if current_config_best_profit > local_best_profit:
                         local_best_profit = current_config_best_profit
                         local_best_x = current_config_best_x
                         local_best_title = f"M={model_idx}, R={n_r}, S={n_s}"
-                        print(f"--- New Best ({search_name}): {local_best_profit:,.2f} ({local_best_title}) ---")
+                        print(f"\n--- New Best ({search_name}): {local_best_profit:,.2f} ({local_best_title}) ---")
 
     elapsed = time.time() - start_time
-    print(f"--- {search_name} Complete ({elapsed:.2f}s) ---")
+    print(f"\n--- {search_name} Complete ({elapsed:.2f}s) ---")
 
     if return_all_results:
         return results, local_best_profit, local_best_x, local_best_title
@@ -374,53 +389,50 @@ if __name__ == "__main__":
     overall_start_time = time.time()
 
     # =========================================================================
-    # 1. DENSE COARSE SEARCH (High Compute)
+    # 1. DENSE COARSE SEARCH (EXPANDED VARIABLES)
     # =========================================================================
 
-    # We check EVERY reactor count and EVERY 5th storage module.
-    # This ensures we don't "skip" over a narrow peak.
-    N_REACTOR_MAX = 20
-    N_STORAGE_MAX = 400
+    # EXPANDED HARDWARE RANGES
+    N_REACTOR_MAX = 30  # Was 20
+    N_STORAGE_MAX = 1000  # Was 400
 
-    stage1_reactor_range = range(0, N_REACTOR_MAX + 1, 1)  # Step 1 (Dense)
-    stage1_storage_range = range(0, N_STORAGE_MAX + 1, 5)  # Step 5 (Semi-Dense)
-    stage1_smoothness = np.linspace(0.01, 1.0, 40)  # 40 steps per config
+    stage1_reactor = range(0, N_REACTOR_MAX + 1, 1)
+    stage1_storage = range(0, N_STORAGE_MAX + 1, 10)  # Step 10 to keep Stage 1 tractable
 
-    print(">>> STAGE 1: ULTRA-DENSE GRID SEARCH <<<")
+    # NEW OPERATIONAL VARIABLES (Coarse grid)
+    # 1. Smoothness: 0.0 (Follow demand) to 1.0 (Flat)
+    s1_smooth = np.linspace(0.01, 1.0, 10)
+    # 2. Bias: 0.9 (Underproduce) to 1.1 (Overproduce)
+    s1_bias = [0.9, 1.0, 1.05, 1.1]
+    # 3. Init SOC: Start empty or start with buffer
+    s1_soc = [0.0, 0.2, 0.5]
+
+    print(">>> STAGE 1: MULTI-VARIABLE GRID SEARCH <<<")
     results_list, _, _, _ = run_search_grid(
         range(len(reactor_models)),
-        stage1_reactor_range,
-        stage1_storage_range,
-        stage1_smoothness,
+        stage1_reactor,
+        stage1_storage,
+        s1_smooth,
+        s1_bias,
+        s1_soc,
         search_name="Stage 1",
         return_all_results=True
     )
 
     # =========================================================================
-    # 2. "TOP-K" SEED SELECTION
+    # 2. SEED SELECTION
     # =========================================================================
-
-    # Sort results by profit descending
     results_list.sort(key=lambda x: x[0], reverse=True)
-
-    # Select unique seeds. We don't want 5 seeds that are just N_S=50, 51, 52...
-    # We select the best hardware configs that are "distinct" enough.
-    # Simple distinct logic: Unique (Model, N_Reactor) combination.
-
     seeds_to_refine = set()
 
-    # Always add the manual heuristics just in case
+    # Standard manual heuristics
     seeds_to_refine.add((2, 1, 12))
     seeds_to_refine.add((3, 1, 0))
 
     print(f"\n>>> SEED SELECTION (Top distinct hardware configs) <<<")
     found_count = 0
     for profit, x, m, nr, ns in results_list:
-        # Create a simplified signature for uniqueness (Model + Reactor Count)
-        # We allow different storage counts to compete in the refinement stage
         signature = (m, nr)
-
-        # Check if we already have this "basin"
         is_duplicate_basin = False
         for existing_m, existing_nr, _ in seeds_to_refine:
             if existing_m == m and existing_nr == nr:
@@ -432,31 +444,27 @@ if __name__ == "__main__":
             seeds_to_refine.add((m, nr, ns))
             found_count += 1
 
-        if found_count >= 5:  # Take top 5 distinct hardware setups
-            break
+        if found_count >= 5: break
 
     # =========================================================================
-    # 3. HYPER-REFINEMENT (Maximum Compute)
+    # 3. HYPER-REFINEMENT (MAXIMUM VARIABLES & COMPUTE)
     # =========================================================================
 
     global_best_profit = -np.inf
     global_best_x = None
     global_best_title = ""
 
-    # Parameters for refinement
-    # Look +/- 5 storage modules around the seed
-    # Look +/- 1 reactor count around the seed (just in case)
-    # Use 200 smoothness parameters
-    fine_smoothness = np.linspace(0.01, 1.0, 200)
+    # Fine-grained operational variables
+    fine_smooth = np.linspace(0.01, 1.0, 50)
+    fine_bias = np.linspace(0.85, 1.15, 10)  # Finely tune over/under production
+    fine_soc = np.linspace(0.0, 0.5, 5)  # Finely tune start condition
 
     print(f"\n>>> STAGE 2: HYPER-REFINEMENT ({len(seeds_to_refine)} seeds) <<<")
 
     for i, (seed_m, seed_nr, seed_ns) in enumerate(seeds_to_refine):
-
-        # Define local windows
         local_reactor_range = range(max(0, seed_nr - 1), min(N_REACTOR_MAX + 1, seed_nr + 2))
-        # Search wide around storage (e.g., +/- 50) because coarse step was 5
-        local_storage_range = range(max(0, seed_ns - 50), min(N_STORAGE_MAX + 1, seed_ns + 51))
+        # Check +/- 20 storage units around seed
+        local_storage_range = range(max(0, seed_ns - 20), min(N_STORAGE_MAX + 1, seed_ns + 21))
 
         s_title = f"Seed {i + 1} (M={seed_m}, R={seed_nr}, S~{seed_ns})"
 
@@ -464,7 +472,9 @@ if __name__ == "__main__":
             [seed_m],
             local_reactor_range,
             local_storage_range,
-            fine_smoothness,
+            fine_smooth,
+            fine_bias,
+            fine_soc,
             search_name=s_title,
             return_all_results=False
         )
