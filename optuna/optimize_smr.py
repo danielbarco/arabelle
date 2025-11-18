@@ -7,10 +7,13 @@ This script uses Optuna to find the optimal configuration of:
 - Number of storage modules
 - Hourly reactor production schedule
 - Battery state of charge schedule
+
+Supports multi-CPU parallel optimization.
 """
 
 import sys
 from pathlib import Path
+import multiprocessing as mp
 
 # Add parent directory to path to import the main module
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -82,24 +85,67 @@ def create_objective_function(penalty_weight=1e8):
     return optuna_objective
 
 
-def optimize_smr(n_trials=100, study_name="smr_optimization", storage_path=optuna):
+def run_optimization_worker(study_name, storage, n_trials, worker_id):
     """
-    Run Optuna optimization for the SMR battery storage problem.
+    Worker function for parallel optimization.
 
     Args:
-        n_trials: Number of optimization trials
         study_name: Name of the Optuna study
-        storage_path: Optional path to SQLite database for study persistence
+        storage: SQLite storage URL
+        n_trials: Number of trials for this worker
+        worker_id: ID of this worker process
+    """
+    print(f"Worker {worker_id} starting with {n_trials} trials...")
+
+    # Load existing study from storage
+    study = optuna.load_study(
+        study_name=study_name,
+        storage=storage,
+        sampler=TPESampler(seed=42 + worker_id),
+    )
+
+    # Create objective function
+    obj_func = create_objective_function()
+
+    # Optimize
+    study.optimize(obj_func, n_trials=n_trials, show_progress_bar=False)
+
+    print(f"Worker {worker_id} completed.")
+
+
+def optimize_smr(
+    n_trials=2000,
+    study_name="smr_optimization",
+    storage_path="optuna/optuna_study.db",
+    n_jobs=-1,
+):
+    """
+    Run Optuna optimization for the SMR battery storage problem with multi-CPU support.
+
+    Args:
+        n_trials: Total number of optimization trials
+        study_name: Name of the Optuna study
+        storage_path: Path to SQLite database for study persistence
+        n_jobs: Number of parallel jobs (-1 for all CPUs, -2 for all but one, etc.)
 
     Returns:
         Optimized study object
     """
-    # Create storage if path provided
-    storage = None
-    if storage_path:
-        storage = f"sqlite:///{storage_path}"
+    # Determine number of workers
+    if n_jobs == -1:
+        n_workers = mp.cpu_count()
+    elif n_jobs < -1:
+        n_workers = max(1, mp.cpu_count() + n_jobs + 1)
+    else:
+        n_workers = max(1, n_jobs)
 
-    # Create study (maximize profit)
+    print(f"Running optimization with {n_workers} parallel workers on {mp.cpu_count()} CPUs")
+    print(f"Total trials: {n_trials}")
+
+    # Create storage
+    storage = f"sqlite:///{storage_path}"
+
+    # Create or load study
     study = optuna.create_study(
         study_name=study_name,
         direction="maximize",
@@ -108,17 +154,38 @@ def optimize_smr(n_trials=100, study_name="smr_optimization", storage_path=optun
         load_if_exists=True,
     )
 
-    # Create objective function
-    obj_func = create_objective_function()
+    # Distribute trials among workers
+    trials_per_worker = n_trials // n_workers
+    remaining_trials = n_trials % n_workers
 
-    # Optimize
-    print(f"Starting optimization with {n_trials} trials...")
-    study.optimize(obj_func, n_trials=n_trials, show_progress_bar=True)
+    if n_workers == 1:
+        # Single process optimization
+        obj_func = create_objective_function()
+        print(f"Starting optimization with {n_trials} trials...")
+        study.optimize(obj_func, n_trials=n_trials, show_progress_bar=True)
+    else:
+        # Multi-process optimization
+        processes = []
+        for i in range(n_workers):
+            worker_trials = trials_per_worker + (1 if i < remaining_trials else 0)
+            p = mp.Process(
+                target=run_optimization_worker, args=(study_name, storage, worker_trials, i)
+            )
+            processes.append(p)
+            p.start()
+
+        # Wait for all workers to complete
+        for p in processes:
+            p.join()
+
+        # Reload study to get all results
+        study = optuna.load_study(study_name=study_name, storage=storage)
 
     # Print results
     print("\n" + "=" * 80)
     print("Optimization Results")
     print("=" * 80)
+    print(f"Total trials completed: {len(study.trials)}")
     print(f"Best trial: {study.best_trial.number}")
     print(f"Best value (annual profit): €{study.best_value:,.2f}")
     print("\nBest parameters:")
@@ -149,9 +216,12 @@ def optimize_smr(n_trials=100, study_name="smr_optimization", storage_path=optun
 
 
 if __name__ == "__main__":
-    # Run optimization
+    # Run optimization with all available CPUs
     study = optimize_smr(
-        n_trials=2000, study_name="smr_battery_optimization", storage_path="optuna/optuna_study.db"
+        n_trials=2000,
+        study_name="smr_battery_optimization",
+        storage_path="optuna/optuna_study.db",
+        n_jobs=-1,  # Use all CPUs
     )
 
     # Optional: Generate optimization history plot
@@ -165,12 +235,12 @@ if __name__ == "__main__":
         fig1 = plot_optimization_history(study)
         plt.tight_layout()
         plt.savefig("optuna/optimization_history.png", dpi=150)
-        print("\nSaved optimization history to optimization_history.png")
+        print("\nSaved optimization history to optuna/optimization_history.png")
 
         fig2 = plot_param_importances(study, params=["reactor_model", "n_reactor", "n_storage"])
         plt.tight_layout()
-        plt.savefig("param_importances.png", dpi=150)
-        print("Saved parameter importances to param_importances.png")
+        plt.savefig("optuna/param_importances.png", dpi=150)
+        print("Saved parameter importances to optuna/param_importances.png")
 
         plt.show()
     except ImportError:
