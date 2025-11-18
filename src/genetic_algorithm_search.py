@@ -6,9 +6,6 @@ Architecture:
 2.  Phase 1: Genetic Algorithm with Adaptive Mutation & Elitism.
 3.  Inner Loop: Multi-Start SLSQP (Runs solver twice per config to ensure dispatch optimality).
 4.  Phase 2: Deep Neighborhood Polish (Wide-radius search on top candidates).
-
-Author: Gemini
-Date: 2025
 """
 
 import numpy as np
