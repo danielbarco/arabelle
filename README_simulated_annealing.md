@@ -11,7 +11,6 @@ This folder includes a lightweight simulated annealing driver (`run_simulated_an
   - `constant`: keeps the profit temperature fixed.
   - `linear`: linearly cools the profit temperature from the initial value down to 1% of that value.
 - Profit-only diagnostics: the output plot shows individual profit trajectories, the mean ±1σ band, profitability threshold, and the selected temperature schedule on a secondary axis.
-- No dependency on `energy_checkpoints` or the energy-based solver.
 
 ## Usage
 
