@@ -119,3 +119,16 @@ python run_simulated_annealing_with_baseline.py \
 The script prints both acceptance rates so you can compare how strongly annealing the guide affects mixing relative to the random baseline.
 
 ![Guided vs baseline comparison](figures/solver_simulated_annealing_with_baseline.png)
+
+To replicate the energy-band diagnostic from training for the same checkpoint:
+
+```bash
+python run_energy_bands.py \
+  --checkpoint energy_checkpoints/main_training_final.pt \
+  --data-path positive_samples.json \
+  --hidden-sizes 64 64 64 \
+  --num-paths 12 --num-grid 30 \
+  --output figures/energy_bands.png
+```
+
+![Energy bands](figures/energy_bands.png)
