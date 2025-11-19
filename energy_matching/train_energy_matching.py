@@ -12,7 +12,9 @@ from tqdm import tqdm
 from energy_matching import data as data_mod, model as model_mod, noise
 
 
-def pair_with_noise(x_data: torch.Tensor, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def pair_with_noise(
+    x_data: torch.Tensor, device: torch.device
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     batch_size = x_data.size(0)
     x_noise = noise.sample_uniform_noise(batch_size, device=device)
     t = torch.rand(batch_size, 1, device=device)
@@ -24,7 +26,9 @@ def pair_with_noise(x_data: torch.Tensor, device: torch.device) -> Tuple[torch.T
 def train(cfg):
     device = torch.device("cuda" if torch.cuda.is_available() and not cfg.cpu else "cpu")
     dataset = data_mod.PositiveSamplesDataset(cfg.data_path)
-    dataloader = DataLoader(dataset, batch_size=cfg.batch_size, shuffle=True, num_workers=cfg.num_workers)
+    dataloader = DataLoader(
+        dataset, batch_size=cfg.batch_size, shuffle=True, num_workers=cfg.num_workers
+    )
 
     model = model_mod.build_energy_model(cfg.hidden_sizes, cfg.dropout).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
@@ -55,7 +59,10 @@ def train(cfg):
         if cfg.checkpoint_dir:
             ckpt_path = Path(cfg.checkpoint_dir)
             ckpt_path.mkdir(parents=True, exist_ok=True)
-            torch.save({"model": model.state_dict(), "epoch": epoch + 1}, ckpt_path / f"energy_model_epoch_{epoch+1}.pt")
+            torch.save(
+                {"model": model.state_dict(), "epoch": epoch + 1},
+                ckpt_path / f"energy_model_epoch_{epoch+1}.pt",
+            )
 
     if cfg.log_path:
         with open(cfg.log_path, "w", encoding="utf-8") as f:
@@ -63,13 +70,15 @@ def train(cfg):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train Energy Matching scalar network on SMR dataset.")
-    parser.add_argument("--data-path", type=str, default="positive_samples.json")
+    parser = argparse.ArgumentParser(
+        description="Train Energy Matching scalar network on SMR dataset."
+    )
+    parser.add_argument("--data-path", type=str, default="energy_matching/positive_samples.json")
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
-    parser.add_argument("--hidden-sizes", type=int, nargs="+", default=[512, 512, 512])
+    parser.add_argument("--hidden-sizes", type=int, nargs="+", default=[64, 64, 64])
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--cpu", action="store_true")

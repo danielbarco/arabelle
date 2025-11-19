@@ -168,13 +168,13 @@ def train(cfg):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Main Energy Matching training with FM + CD objectives.")
-    parser.add_argument("--data-path", type=str, default="positive_samples.json")
+    parser.add_argument("--data-path", type=str, default="energy_matching/positive_samples.json")
     parser.add_argument("--resume", type=str, default="energy_checkpoints/energy_model_epoch_20.pt")
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
-    parser.add_argument("--hidden-sizes", type=int, nargs="+", default=[512, 512, 512])
+    parser.add_argument("--hidden-sizes", type=int, nargs="+", default=[64, 64, 64])
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--cpu", action="store_true")

@@ -55,7 +55,9 @@ def _mark_best(ax, result, label, highlight_color, y_frac: float):
         fontsize=11,
         fontweight="bold",
         color=highlight_color,
-        bbox=dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor=highlight_color, alpha=0.9),
+        bbox=dict(
+            boxstyle="round,pad=0.2", facecolor="white", edgecolor=highlight_color, alpha=0.9
+        ),
         arrowprops=dict(arrowstyle="->", color=highlight_color, linewidth=1.2),
         ha="right",
         zorder=7,
@@ -84,7 +86,9 @@ def _delta_corr_stats(result) -> tuple[float, float]:
 
 def plot_comparison(guided, baseline, output_path: Path) -> None:
     if guided.times.shape != baseline.times.shape:
-        raise ValueError("Guided and baseline runs must have the same number of steps to plot together.")
+        raise ValueError(
+            "Guided and baseline runs must have the same number of steps to plot together."
+        )
 
     fig, (ax_energy, ax_profit, ax_sched) = plt.subplots(1, 3, figsize=(18, 5))
 
@@ -101,7 +105,9 @@ def plot_comparison(guided, baseline, output_path: Path) -> None:
     ax_energy.legend(loc="best")
 
     _plot_series(ax_profit, guided.times.numpy(), guided.profits, "Guided profit", "#1976d2", "-")
-    _plot_series(ax_profit, baseline.times.numpy(), baseline.profits, "Baseline profit", "#6d4c41", "--")
+    _plot_series(
+        ax_profit, baseline.times.numpy(), baseline.profits, "Baseline profit", "#6d4c41", "--"
+    )
     _mark_best(ax_profit, guided, "guided", "#ffb300", y_frac=0.7)
     _mark_best(ax_profit, baseline, "baseline", "#8e24aa", y_frac=0.5)
     ax_profit.set_xlabel("Normalized time")
@@ -116,12 +122,25 @@ def plot_comparison(guided, baseline, output_path: Path) -> None:
     ax_sched_right = None
     if guided.profit_temps is not None and guided.profit_temps.numel() > 0:
         t_sched = np.linspace(0.0, 1.0, guided.profit_temps.shape[0])
-        h = ax_sched.plot(t_sched, guided.profit_temps.numpy(), color="#1976d2", linewidth=2.0, label="Guided profit temp")[0]
+        h = ax_sched.plot(
+            t_sched,
+            guided.profit_temps.numpy(),
+            color="#1976d2",
+            linewidth=2.0,
+            label="Guided profit temp",
+        )[0]
         sched_handles.append(h)
         sched_labels.append("Guided profit temp")
     if baseline.profit_temps is not None and baseline.profit_temps.numel() > 0:
         t_sched = np.linspace(0.0, 1.0, baseline.profit_temps.shape[0])
-        h = ax_sched.plot(t_sched, baseline.profit_temps.numpy(), color="#6d4c41", linestyle="--", linewidth=2.0, label="Baseline profit temp")[0]
+        h = ax_sched.plot(
+            t_sched,
+            baseline.profit_temps.numpy(),
+            color="#6d4c41",
+            linestyle="--",
+            linewidth=2.0,
+            label="Baseline profit temp",
+        )[0]
         sched_handles.append(h)
         sched_labels.append("Baseline profit temp")
     if guided.guide_strengths is not None and guided.guide_strengths.numel() > 0:
@@ -129,7 +148,13 @@ def plot_comparison(guided, baseline, output_path: Path) -> None:
             t_sched = np.linspace(0.0, 1.0, guided.guide_strengths.shape[0])
             if ax_sched_right is None:
                 ax_sched_right = ax_sched.twinx()
-            h = ax_sched_right.plot(t_sched, guided.guide_strengths.numpy(), color="#ffb300", linewidth=2.0, label="Guide strength")[0]
+            h = ax_sched_right.plot(
+                t_sched,
+                guided.guide_strengths.numpy(),
+                color="#ffb300",
+                linewidth=2.0,
+                label="Guide strength",
+            )[0]
             sched_handles.append(h)
             sched_labels.append("Guide strength")
     ax_sched.set_xlabel("Normalized time")
@@ -149,9 +174,11 @@ def plot_comparison(guided, baseline, output_path: Path) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Compare guided and random baseline simulated annealing runs.")
+    parser = argparse.ArgumentParser(
+        description="Compare guided and random baseline simulated annealing runs."
+    )
     parser.add_argument("--checkpoint", type=str, required=True)
-    parser.add_argument("--data-path", type=str, default="positive_samples.json")
+    parser.add_argument("--data-path", type=str, default="energy_matching/positive_samples.json")
     parser.add_argument("--num-chains", type=int, default=16)
     parser.add_argument("--steps", type=int, default=500)
     parser.add_argument("--total-time", type=float, default=1.0)
@@ -161,12 +188,18 @@ def main():
     parser.add_argument("--guide-prob", type=float, default=0.7)
     parser.add_argument("--guide-beta", type=float, default=10.0)
     parser.add_argument("--guide-lambda", type=float, default=1.0)
-    parser.add_argument("--profit-schedule", type=str, choices=["constant", "linear"], default="linear")
+    parser.add_argument(
+        "--profit-schedule", type=str, choices=["constant", "linear"], default="linear"
+    )
     parser.add_argument("--profit-final-ratio", type=float, default=0.01)
-    parser.add_argument("--guide-schedule", type=str, choices=["constant", "linear"], default="linear")
+    parser.add_argument(
+        "--guide-schedule", type=str, choices=["constant", "linear"], default="linear"
+    )
     parser.add_argument("--guide-final-ratio", type=float, default=0.2)
-    parser.add_argument("--output", type=str, default="figures/solver_simulated_annealing_with_baseline.png")
-    parser.add_argument("--hidden-sizes", type=int, nargs="+", default=[512, 512, 512])
+    parser.add_argument(
+        "--output", type=str, default="figures/solver_simulated_annealing_with_baseline.png"
+    )
+    parser.add_argument("--hidden-sizes", type=int, nargs="+", default=[64, 64, 64])
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--seed", type=int, default=None)
