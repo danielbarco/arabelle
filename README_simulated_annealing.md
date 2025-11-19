@@ -117,3 +117,5 @@ python run_simulated_annealing_with_baseline.py \
 ```
 
 The script prints both acceptance rates so you can compare how strongly annealing the guide affects mixing relative to the random baseline.
+
+![Guided vs baseline comparison](figures/solver_simulated_annealing_with_baseline.png)
