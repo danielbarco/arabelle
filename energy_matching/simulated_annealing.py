@@ -73,7 +73,15 @@ def _dlangevin_update(block: torch.Tensor, grad_block: torch.Tensor, beta: float
         new_block[stay_mask] = block[stay_mask]
     return new_block
 
-def _build_schedule(initial: float, final_ratio: float, steps: int, device: torch.device, mode: str) -> torch.Tensor:
+def _build_schedule(
+    initial: float,
+    final_ratio: float,
+    steps: int,
+    device: torch.device,
+    mode: str,
+    *,
+    drop_after_half: bool = False,
+) -> torch.Tensor:
     if steps <= 0:
         return torch.empty(0, device=device)
     mode = mode.lower()
@@ -81,8 +89,15 @@ def _build_schedule(initial: float, final_ratio: float, steps: int, device: torc
         raise ValueError(f"Unknown schedule mode '{mode}'.")
     final_value = float(initial) * float(final_ratio)
     if mode == "constant" or abs(final_value - initial) < 1e-12:
-        return torch.full((steps,), float(initial), device=device, dtype=torch.float32)
-    return torch.linspace(float(initial), final_value, steps, device=device, dtype=torch.float32)
+        schedule = torch.full((steps,), float(initial), device=device, dtype=torch.float32)
+    else:
+        schedule = torch.linspace(float(initial), final_value, steps, device=device, dtype=torch.float32)
+    if drop_after_half and steps > 0:
+        half_count = max(1, int(math.ceil(0.5 * steps)))
+        first_half = torch.linspace(float(initial), 0.0, half_count, device=device, dtype=torch.float32)
+        zero_tail = torch.zeros(max(0, steps - half_count), device=device, dtype=torch.float32)
+        schedule = torch.cat([first_half, zero_tail], dim=0)
+    return schedule
 
 
 def simulate(
@@ -145,16 +160,29 @@ def simulate(
 
     times = torch.linspace(0.0, total_time, steps + 1)
     profit_temps = _build_schedule(profit_temp, profit_final_ratio, steps, device, profit_schedule)
-    guide_strengths = _build_schedule(guide_strength, guide_final_ratio, steps, device, guide_schedule)
+    guide_strengths = _build_schedule(
+        guide_strength,
+        guide_final_ratio,
+        steps,
+        device,
+        guide_schedule,
+        drop_after_half=True,
+    )
     energy_history = []
     profit_history = []
     total_accepts = 0
     total_proposals = 0
 
     guide_enabled = proposal_mode == "guided" and ((guide_strength > 0.0) or (guide_prob > 0.0))
+    initial_guide_strength = guide_strength
+    random_override = False
+    guide_switch_step = max(0, int(math.ceil(0.5 * max(steps, 1))))
 
     for step in range(steps + 1):
-        compute_grad = guide_enabled and step < steps
+        if proposal_mode == "guided" and not random_override and step >= guide_switch_step:
+            random_override = True
+        current_mode = "random" if (random_override or proposal_mode == "random") else "guided"
+        compute_grad = (current_mode == "guided") and guide_enabled and step < steps
         if compute_grad:
             base_state = states.detach().clone().requires_grad_(True)
             energy_vals = model(base_state)
@@ -176,7 +204,8 @@ def simulate(
         proposal = curr_state.clone()
         cont = proposal[:, common.DISCRETE_DIM :]
         current_guide = guide_strengths[step] if guide_strengths.numel() > 0 else torch.tensor(guide_strength, device=device)
-        if grads is not None and current_guide.item() > 0.0:
+        current_guide_val = current_guide.item() if current_guide.numel() > 0 else float(guide_strength)
+        if grads is not None and current_mode == "guided" and current_guide_val > 0.0:
             cont = cont - current_guide * grads[:, common.DISCRETE_DIM :]
         cont = cont + cont_temp * torch.randn_like(cont)
         cont = torch.clamp(cont, 0.0, 1.0)
@@ -191,7 +220,7 @@ def simulate(
         for block_size in blocks:
             block_slice = slice(offset, offset + block_size)
             block = curr_state[:, block_slice]
-            if proposal_mode == "random":
+            if current_mode == "random":
                 candidate = _local_discrete_step(block)
             else:
                 random_block = _random_discrete_step(block)

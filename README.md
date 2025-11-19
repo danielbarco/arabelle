@@ -107,11 +107,11 @@ Important flags:
 python run_simulated_annealing_with_baseline.py \
   --checkpoint energy_checkpoints/main_training_final.pt \
   --data-path positive_samples.json \
-  --num-chains 16 --steps 500 --total-time 1.0 \
+  --num-chains 32 --steps 1000 --total-time 1.0 \
   --cont-temp 0.05 --profit-temp 1e7 \
   --guide-strength 0.02 --guide-prob 0.7 \
   --profit-schedule linear --profit-final-ratio 0.01 \
-  --guide-schedule linear --guide-final-ratio 0.2 \
+  --guide-schedule linear --guide-final-ratio 1.0 \
   --hidden-sizes 64 64 64 \
   --output figures/solver_simulated_annealing_with_baseline.png
 ```
