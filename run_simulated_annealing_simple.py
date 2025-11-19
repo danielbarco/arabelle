@@ -33,67 +33,10 @@ def random_discrete_step(block: torch.Tensor) -> torch.Tensor:
     return torch.nn.functional.one_hot(new_idx, num_classes=num_classes).float()
 
 
-def materialize_state(fraction_state: torch.Tensor) -> torch.Tensor:
-    device = fraction_state.device
-    state = fraction_state.clone()
-    start = 0
-    model_block = state[:, start : start + common.NUM_REACTOR_MODELS]
-    model_idx = model_block.argmax(dim=1)
-    start += common.NUM_REACTOR_MODELS
-
-    n_reactors_block = state[:, start : start + common.NUM_REACTOR_COUNT_OPTIONS]
-    n_reactors = n_reactors_block.argmax(dim=1) + 1
-    start += common.NUM_REACTOR_COUNT_OPTIONS
-
-    storage_block = state[:, start : start + common.NUM_STORAGE_OPTIONS]
-    n_storage = storage_block.argmax(dim=1)
-    start += common.NUM_STORAGE_OPTIONS
-
-    prod_slice = slice(start, start + common.HORIZON)
-    soc_slice = slice(start + common.HORIZON, start + 2 * common.HORIZON)
-
-    reactor_caps = torch.tensor(common.REACTOR_MODELS, device=device)[model_idx]
-    cap_ratio = (
-        reactor_caps * n_reactors.float() / common.MAX_PRODUCTION_CAPACITY
-    ).clamp(min=0.0)
-    state[:, prod_slice] = state[:, prod_slice].clamp(0.0, 1.0) * cap_ratio.unsqueeze(1)
-
-    storage_energy = (
-        n_storage.float() * common.MODULE_CAPACITY_MWH / common.MAX_SOC_CAPACITY
-    ).clamp(min=0.0)
-    state[:, soc_slice] = state[:, soc_slice].clamp(0.0, 1.0) * storage_energy.unsqueeze(1)
-    return state
-
-
 def enforce_physical_limits(state: torch.Tensor) -> torch.Tensor:
-    device = state.device
-    start = 0
-    model_block = state[:, start : start + common.NUM_REACTOR_MODELS]
-    model_idx = model_block.argmax(dim=1)
-    start += common.NUM_REACTOR_MODELS
-
-    n_reactors_block = state[:, start : start + common.NUM_REACTOR_COUNT_OPTIONS]
-    n_reactors = n_reactors_block.argmax(dim=1) + 1
-    start += common.NUM_REACTOR_COUNT_OPTIONS
-
-    storage_block = state[:, start : start + common.NUM_STORAGE_OPTIONS]
-    n_storage = storage_block.argmax(dim=1)
-    start += common.NUM_STORAGE_OPTIONS
-
-    prod_slice = slice(start, start + common.HORIZON)
-    soc_slice = slice(start + common.HORIZON, start + 2 * common.HORIZON)
-
-    reactor_caps = torch.tensor(common.REACTOR_MODELS, device=device)[model_idx]
-    cap_ratio = (
-        reactor_caps * n_reactors.float() / common.MAX_PRODUCTION_CAPACITY
-    ).clamp(min=0.0, max=1.0)
-    state[:, prod_slice] = torch.minimum(state[:, prod_slice], cap_ratio.unsqueeze(1))
-
-    storage_energy = (
-        n_storage.float() * common.MODULE_CAPACITY_MWH / common.MAX_SOC_CAPACITY
-    ).clamp(min=0.0, max=1.0)
-    state[:, soc_slice] = torch.minimum(state[:, soc_slice], storage_energy.unsqueeze(1))
-    return state
+    limited = state.clone()
+    limited[:, common.DISCRETE_DIM :] = limited[:, common.DISCRETE_DIM :].clamp(0.0, 1.0)
+    return limited
 
 
 def simulated_annealing(
@@ -109,7 +52,8 @@ def simulated_annealing(
     if seed is not None:
         torch.manual_seed(seed)
 
-    states = enforce_physical_limits(noise.sample_uniform_noise(num_chains, device=device))
+    states = noise.sample_uniform_noise(num_chains, device=device)
+    states = enforce_physical_limits(states)
     init_mask = torch.zeros(num_chains, dtype=torch.bool, device=device)
 
     times = torch.linspace(0.0, total_time, steps + 1)
