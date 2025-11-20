@@ -16,17 +16,18 @@ import time
 import random
 import itertools
 
-# ------------------------- Configuration: ULTRA HEAVY -----------------------
+random.seed(2025)
+np.random.seed(2025)
 
 # Search Space Limits
-MAX_REACTORS = 16       # Increased search range
-MAX_STORAGE = 800       # Increased search range
+MAX_REACTORS = 5       # Increased search range
+MAX_STORAGE = 20       # Increased search range
 N_MODELS = 5            # Indices 0-4
 
 # "Spend More Compute" Parameters
 POPULATION_SIZE = 200       # Larger gene pool
 GENERATIONS = 60            # Longer evolution
-GRID_SEED_DENSITY = 15      # How many points to scan per dimension in Seeding
+GRID_SEED_DENSITY = 25      # How many points to scan per dimension in Seeding
 MULTI_START_SOLVER = True   # If True, runs SLSQP twice (smart guess + flat guess)
 
 # Economics
@@ -341,9 +342,6 @@ def perform_deep_polish(candidates):
 
 def run_optimization():
     start_time = time.time()
-    print("==========================================================")
-    print("   ULTRA-HEAVY COMPUTE OPTIMIZATION ENGAGED")
-    print("==========================================================")
 
     all_history_points = [] # For visualization (profit, r, s)
 

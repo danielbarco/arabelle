@@ -18,6 +18,10 @@ import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 import concurrent.futures
 import time
+import random
+
+random.seed(2025)
+np.random.seed(2025)
 
 # ------------------------- Problem Data -------------------------------------
 horizon = 24

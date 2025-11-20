@@ -18,6 +18,10 @@ heuristics to find a feasible, high-profit configuration.
 import matplotlib.pyplot as plt
 import numpy as np
 import time
+import random
+
+random.seed(2025)
+np.random.seed(2025)
 
 # ------------------------- Problem data -------------------------------------
 horizon = 24  # hourly horizon

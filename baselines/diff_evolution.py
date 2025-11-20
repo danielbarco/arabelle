@@ -12,6 +12,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import argparse
 from scipy.optimize import differential_evolution, NonlinearConstraint
+import random
+
+random.seed(2025)
+np.random.seed(2025)
 
 # ------------------------- Problem Data -------------------------------------
 horizon = 24  # Hourly horizon
