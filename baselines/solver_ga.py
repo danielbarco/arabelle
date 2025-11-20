@@ -9,9 +9,21 @@ np.random.seed(2025)
 
 
 def run_solver(settings: common.SimSettings):
-    POP_SIZE = 28
+    # --- 1. ESTABLISH SEARCH SPACE ---
+    POP_SIZE = 30
     GENS = 5
 
+    # Theoretical combinatorial space (for comparison)
+    theo_r = settings.max_reactors + 1
+    theo_s = settings.max_storage + 1  # GA can hit any integer
+    theo_space = len(common.REACTOR_MODELS) * theo_r * theo_s
+
+    actual_evals = POP_SIZE * GENS
+
+    print(f"    [Space Analysis] Theoretical Hardware Space: {theo_space} combos")
+    print(f"    [Space Analysis] Genetic Strategy: {POP_SIZE} Pop x {GENS} Gens = {actual_evals} Optimizations")
+
+    # --- 3. EXECUTION ---
     def create_ind():
         return (random.randint(0, len(common.REACTOR_MODELS) - 1),
                 random.randint(0, settings.max_reactors),
@@ -54,8 +66,3 @@ def run_solver(settings: common.SimSettings):
         population = next_gen
 
     return best_res
-
-if __name__ == "__main__":
-    settings = common.SimSettings(fixed_initial_soc=None, storage_step=5)
-    result = run_solver(settings)
-    print(f"Best Profit: {result['profit']}, Config: {result['config']}")

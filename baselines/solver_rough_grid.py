@@ -4,20 +4,31 @@ import common
 
 
 def run_solver(settings: common.SimSettings):
-    # 1. Hardware Space based on settings
+    # --- 1. ESTABLISH SEARCH SPACE ---
+    # Hardware Dimensions
     N_MODELS = len(common.REACTOR_MODELS)
+    r_range = list(range(settings.max_reactors + 1))
+    s_range = list(range(0, settings.max_storage + 1, settings.storage_step))
 
-    # 2. Operational Space
-    # Coarse grid for Brute Force (Speed over precision)
-    SMOOTHNESS_PARAMS = np.linspace(0.0, 1.0, 10)  # Reduced for brute demo
+    # Operational Dimensions (Hardcoded in this solver)
+    SMOOTHNESS_PARAMS = np.linspace(0.0, 1.0, 10)
     BIAS_PARAMS = [0.9, 1.0, 1.1]
 
-    # Handling Assumptions: Fixed vs Optimized SOC
+    # Handle SOC Assumption
     if settings.fixed_initial_soc is not None:
         INIT_SOC_PARAMS = [settings.fixed_initial_soc]
     else:
-        INIT_SOC_PARAMS = [0.0, 0.3, 0.5, 0.8]  # Search optimized start
+        INIT_SOC_PARAMS = [0.0, 0.3, 0.5, 0.8]
 
+    # --- 2. ESTIMATE & PRINT SPACE ---
+    n_hardware = N_MODELS * len(r_range) * len(s_range)
+    n_ops = len(SMOOTHNESS_PARAMS) * len(BIAS_PARAMS) * len(INIT_SOC_PARAMS)
+    total_evals = n_hardware * n_ops
+
+    print(f"    [Space Analysis] Hardware: {n_hardware} combos | Ops per Config: {n_ops}")
+    print(f"    [Space Analysis] Total Grid Points: {total_evals:,.0f}")
+
+    # --- 3. EXECUTION ---
     best_profit = -np.inf
     best_res = {'profit': -np.inf, 'config': (0, 0, 0), 'x': np.zeros(common.HORIZON * 4)}
 
@@ -34,7 +45,7 @@ def run_solver(settings: common.SimSettings):
         max_e = n_s * common.MODULE_CAP_MWH
         max_p = n_s * common.MODULE_POWER_MW
 
-        curr_soc = init_s * max_e  # Start assumption
+        curr_soc = init_s * max_e
 
         for t in range(common.HORIZON):
             mismatch = r_prod[t] - demand[t]
@@ -54,12 +65,9 @@ def run_solver(settings: common.SimSettings):
 
     op_combinations = list(itertools.product(SMOOTHNESS_PARAMS, BIAS_PARAMS, INIT_SOC_PARAMS))
 
-    # Use the step from settings (e.g., step=5 for coarse brute force)
-    storage_range = range(0, settings.max_storage + 1, settings.storage_step)
-
     for m in range(N_MODELS):
-        for r in range(settings.max_reactors + 1):
-            for s in storage_range:
+        for r in r_range:
+            for s in s_range:
                 if r == 0 and s == 0: continue
 
                 fixed_cost = common.calculate_annual_fixed_cost(m, r, s) / 365.0

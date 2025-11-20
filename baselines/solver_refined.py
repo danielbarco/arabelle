@@ -2,22 +2,33 @@ import numpy as np
 import itertools
 import common
 
-
 def run_solver(settings: common.SimSettings):
+    # --- 1. ESTABLISH SEARCH SPACE ---
     # Refined Grid uses denser operational parameters
     SMOOTHNESS = np.linspace(0.0, 1.0, 25)
     BIAS = [0.8, 0.9, 0.95, 1.0, 1.05, 1.1, 1.2]
 
-    # Assumption Check
     if settings.fixed_initial_soc is not None:
         INIT_SOC = [settings.fixed_initial_soc]
     else:
         INIT_SOC = [0.0, 0.3, 0.5, 0.8]
 
+    # Refined ignores settings.storage_step and uses step=1
+    r_range = list(range(settings.max_reactors + 1))
+    s_range = list(range(0, settings.max_storage + 1, 1))
+
+    # --- 2. ESTIMATE & PRINT SPACE ---
+    n_hardware = len(common.REACTOR_MODELS) * len(r_range) * len(s_range)
+    n_ops = len(SMOOTHNESS) * len(BIAS) * len(INIT_SOC)
+    total_evals = n_hardware * n_ops
+
+    print(f"    [Space Analysis] Hardware: {n_hardware} combos (Step=1) | Ops per Config: {n_ops}")
+    print(f"    [Space Analysis] Total Grid Points: {total_evals:,.0f}")
+
+    # --- 3. EXECUTION ---
     best_profit = -np.inf
     best_res = {'profit': -np.inf, 'config': (0, 0, 0), 'x': np.zeros(common.HORIZON * 4)}
 
-    # Same builder as brute, duplicated to keep files standalone if needed
     def build_candidate(r_idx, n_r, n_s, smooth, bias, init_s):
         demand = common.ELECTRIC_DEMAND
         avg = np.mean(demand) * bias
@@ -50,12 +61,9 @@ def run_solver(settings: common.SimSettings):
 
     op_grid = list(itertools.product(SMOOTHNESS, BIAS, INIT_SOC))
 
-    # Refined usually iterates every integer of storage
-    storage_range = range(0, settings.max_storage + 1, 1)
-
     for m in range(len(common.REACTOR_MODELS)):
-        for r in range(settings.max_reactors + 1):
-            for s in storage_range:
+        for r in r_range:
+            for s in s_range:
                 if r == 0 and s == 0: continue
                 fixed_cost = common.calculate_annual_fixed_cost(m, r, s) / 365.0
                 local_best = -np.inf

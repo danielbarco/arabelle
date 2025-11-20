@@ -46,29 +46,38 @@ def run_analysis_plots(df):
     2. Combined Profile Overlay
     """
 
+    # --- DEFINE COLOR PALETTE ---
+    # Group similar approaches with similar colors (shades)
+    algo_colors = {
+        "Rough Grid": "#5DADE2",       # Light Blue
+        "Refined Grid": "#1B4F72",     # Dark Blue
+        "SLSQP (Rough)": "#82E0AA",    # Light Green
+        "SLSQP (Refined)": "#196F3D",  # Dark Green
+        "Genetic Alg": "#E74C3C"       # Red
+    }
+
     # --- PLOT 1: Pareto Frontier (Scatter) ---
     fig1, ax1 = plt.subplots(figsize=(12, 8))
 
-    # Jitter for visibility
+    # Jitter for visibility in scatter plot
     jitter_x = df['Duration (s)'] * np.random.uniform(0.95, 1.05, len(df))
-
-    # Map colors to Algorithm
-    unique_algos = df['Algorithm'].unique()
-    colors = plt.cm.tab10(np.linspace(0, 1, len(unique_algos)))
-    algo_color_map = dict(zip(unique_algos, colors))
 
     # Map markers to Scenario
     markers = {'Fixed 30% SOC': 'X', 'Optimized SOC': 'o'}
 
+    # Get unique algorithms present
+    unique_algos = sorted(df['Algorithm'].unique())
+
     for idx, row in df.iterrows():
-        c = algo_color_map[row['Algorithm']]
+        alg = row['Algorithm']
+        c = algo_colors.get(alg, 'black') # Fallback to black
         m = markers.get(row['Assumption_Set'], 'o')
 
         ax1.scatter(jitter_x.iloc[idx], row['Annual Profit'],
                     s=200, color=c, marker=m, edgecolors='k', alpha=0.8, zorder=3)
 
         # Annotation
-        label = f"{row['Algorithm']}\n({row['Assumption_Set']})"
+        label = f"{alg}\n({row['Assumption_Set']})"
         # Alternate text position to avoid overlap
         xy_offset = (0, 12) if idx % 2 == 0 else (0, -18)
 
@@ -80,11 +89,12 @@ def run_analysis_plots(df):
     ax1.set_title("Benchmark: Efficiency Frontier\n(Circle=Optimized, Cross=Fixed 30%)")
     ax1.grid(True, alpha=0.3)
 
-    # Custom Legend
+    # Custom Legend for Plot 1
     from matplotlib.lines import Line2D
     legend_elements = [Line2D([0], [0], marker='o', color='w', label='Optimized SOC', markerfacecolor='gray', markersize=10),
                        Line2D([0], [0], marker='X', color='w', label='Fixed 30% SOC', markerfacecolor='gray', markersize=10)]
-    for alg, col in algo_color_map.items():
+    for alg in unique_algos:
+        col = algo_colors.get(alg, 'black')
         legend_elements.append(Line2D([0], [0], marker='s', color='w', label=alg, markerfacecolor=col, markersize=10))
 
     ax1.legend(handles=legend_elements, loc='lower right')
@@ -96,6 +106,8 @@ def run_analysis_plots(df):
     fig2, (ax_r, ax_s, ax_net) = plt.subplots(3, 1, figsize=(14, 14), sharex=True)
 
     hours = np.arange(common.HORIZON)
+
+    # Plot Demand (Base layer)
     ax_net.plot(hours, common.ELECTRIC_DEMAND, 'k--', label='Grid Demand', lw=2.5, zorder=10)
 
     # Plot every result in the dataframe
@@ -117,13 +129,16 @@ def run_analysis_plots(df):
         eff_d = common.discharge_efficiency(dis, max_p)
         net_supply = r_prod + dis * eff_d - ch / eff_c
 
-        # Styling
-        color = algo_color_map[row['Algorithm']]
+        # Styling based on Algorithm Type and Scenario
+        alg = row['Algorithm']
+        color = algo_colors.get(alg, 'black')
+
+        # Dash style distinguishes the scenario
         style = '-' if row['Assumption_Set'] == 'Optimized SOC' else ':'
         width = 2.0
         alpha = 0.8
 
-        label_str = f"{row['Algorithm']} ({row['Assumption_Set']})"
+        label_str = f"{alg} ({row['Assumption_Set']})"
 
         ax_r.plot(hours, r_prod, color=color, ls=style, lw=width, alpha=alpha, label=label_str)
         ax_s.plot(hours, soc, color=color, ls=style, lw=width, alpha=alpha)
@@ -132,8 +147,9 @@ def run_analysis_plots(df):
     ax_r.set_title("Reactor Production Strategy")
     ax_r.set_ylabel("Power (MW)")
     ax_r.grid(True, alpha=0.3)
-    # Put legend outside to avoid clutter
-    ax_r.legend(loc='upper center', bbox_to_anchor=(0.5, 1.35), ncol=3, fontsize=8)
+
+    # LEGEND: Placed at the top to cover all lines
+    ax_r.legend(loc='upper center', bbox_to_anchor=(0.5, 1.4), ncol=3, fontsize=9, title="Solver Strategies")
 
     ax_s.set_title("Battery State of Charge (SOC)")
     ax_s.set_ylabel("Energy (MWh)")
@@ -143,6 +159,9 @@ def run_analysis_plots(df):
     ax_net.set_ylabel("Power (MW)")
     ax_net.set_xlabel("Hour of Day")
     ax_net.grid(True, alpha=0.3)
+
+    # Specific Legend for Demand on the bottom plot
+    ax_net.legend(loc='upper right', fontsize=9)
 
     plt.tight_layout()
     plt.show()
@@ -194,7 +213,8 @@ def main():
                 "Raw_Result": result
             })
 
-            common.plot_result(result, alg_name, duration, scenario_name)
+            # Note: common.plot_result is skipped here in favor of the final consolidated plot
+            # common.plot_result(result, alg_name, duration, scenario_name)
 
     # --- SUMMARY ---
     df = pd.DataFrame(results_store)

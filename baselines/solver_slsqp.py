@@ -18,17 +18,16 @@ def solve_operational_slsqp(args):
     x0 = np.zeros(4 * H)
     x0[:H] = np.minimum(cap_mw, common.ELECTRIC_DEMAND)
 
-    # Seed SOC based on settings
     start_seed_soc = 0.5
     if settings.fixed_initial_soc is not None:
         start_seed_soc = settings.fixed_initial_soc
     if max_e > 0: x0[3 * H:] = start_seed_soc * max_e
 
     bounds = []
-    bounds += [(0, cap_mw)] * H  # Prod
-    bounds += [(0, max_p)] * H  # Ch
-    bounds += [(0, max_p)] * H  # Dis
-    bounds += [(0, max_e)] * H  # SOC
+    bounds += [(0, cap_mw)] * H
+    bounds += [(0, max_p)] * H
+    bounds += [(0, max_p)] * H
+    bounds += [(0, max_e)] * H
 
     def obj_func(x):
         r_prod = x[:H]
@@ -47,7 +46,6 @@ def solve_operational_slsqp(args):
             eff_d = common.discharge_efficiency(dis, max_p)
 
             res = []
-            # Periodic Boundary
             prev = soc[-1]
 
             for t in range(H):
@@ -59,7 +57,6 @@ def solve_operational_slsqp(args):
 
         cons.append({'type': 'eq', 'fun': dynamics})
 
-        # Fixed SOC Assumption
         if settings.fixed_initial_soc is not None:
             def fixed_start(x):
                 current_soc_0 = x[3 * H]
@@ -76,13 +73,21 @@ def solve_operational_slsqp(args):
 
 
 def run_solver(settings: common.SimSettings):
-    candidates = []
-    storage_range = range(0, settings.max_storage + 1, settings.storage_step)
+    # --- 1. ESTABLISH SEARCH SPACE ---
+    storage_range = list(range(0, settings.max_storage + 1, settings.storage_step))
+    r_range = list(range(settings.max_reactors + 1))
 
+    # --- 2. ESTIMATE & PRINT SPACE ---
+    n_hardware = len(common.REACTOR_MODELS) * len(r_range) * len(storage_range)
+
+    print(f"    [Space Analysis] Hardware: {n_hardware} combos | Ops: Gradient Descent (Continuous)")
+    print(f"    [Space Analysis] Total Optimizations: {n_hardware}")
+
+    # --- 3. EXECUTION ---
+    candidates = []
     for m in range(len(common.REACTOR_MODELS)):
-        for r in range(settings.max_reactors + 1):
+        for r in r_range:
             for s in storage_range:
-                # PASS SETTINGS IN THE TUPLE
                 candidates.append((m, r, s, settings))
 
     best_profit = -np.inf
@@ -93,7 +98,6 @@ def run_solver(settings: common.SimSettings):
 
     for i, (prof, x) in enumerate(results):
         if prof > best_profit:
-            # Restore config to (m, r, s) for clean output (drop settings)
             clean_config = candidates[i][:3]
             best_profit = prof
             best_res = {'profit': prof, 'config': clean_config, 'x': x}

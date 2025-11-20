@@ -132,6 +132,7 @@ def plot_result(result_dict, algorithm_name, duration, settings_desc):
     ax1.plot(hours, net_supply, 'm-', label='Net Supply', lw=1.5)
     ax1.fill_between(hours, 0, dis, color='red', alpha=0.3, label='Discharge')
     ax1.fill_between(hours, 0, -ch, color='green', alpha=0.3, label='Charge')
+    ax1.legend()
 
     ax1.set_ylabel("Power (MW)")
     ax1.set_title(f"Algo: {algorithm_name} ({settings_desc})\n"
