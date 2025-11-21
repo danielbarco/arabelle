@@ -193,7 +193,7 @@ def objective(x: np.ndarray) -> float:
     annual_fixed_om += cap_storage * storage_fixed_om_frac
 
     # Fuel cost
-    fuel_cost = np.sum(reactor_production) * fuel_price
+    fuel_cost = np.sum(reactor_production) * fuel_price * 365
 
     # Market interactions (daily)
     ch, dis = compute_charge_discharge(soc)
@@ -218,7 +218,7 @@ def objective(x: np.ndarray) -> float:
     return annual_profits
 
 
-def constraints_residuals(x: np.ndarray) -> list[float]:
+def constraints_residuals(x: np.ndarray,ch=None,dis=None) -> list[float]:
     """
     Returns list of inequality constraints residuals which should be >= 0.
     """
@@ -236,7 +236,9 @@ def constraints_residuals(x: np.ndarray) -> list[float]:
     # Storage bounds
     max_storage_energy = n_storage * module_capacity_mwh
     max_storage_power = n_storage * module_power_mw
-    ch, dis = compute_charge_discharge(soc)
+    if ch is None or dis is None:
+        ch, dis = compute_charge_discharge(soc)
+        
     for t in range(horizon):
         # charge and discharge <= max_storage_power
         res.append(max_storage_power - ch[t])
@@ -378,7 +380,7 @@ def evaluate_candidate(cand, title):
 if __name__ == "__main__":
     plt.rcParams["font.family"] = "serif"
     cand = build_candidate_with_storage(
-        reactor_model=2, n_reactor=1, n_storage=12, variability_smoothness=0.6
+        reactor_model=2, n_reactor=1, n_storage=12, variability_smoothness=0.55
     )
     evaluate_candidate(cand, "Smoothed reactor, storage used to track demand")
     cand = build_candidate_wo_storage(reactor_model=3, n_reactor=1)
