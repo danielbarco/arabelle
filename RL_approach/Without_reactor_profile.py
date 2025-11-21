@@ -79,15 +79,16 @@ class SMRStorageEnv(gym.Env):
         # Reactor outputs chosen by agent
         faction_reactor = action[3:]
         reactor_capacity = reactor_models[reactor_model] * n_reactor
-        reactor_production = np.clip(faction_reactor*reactor_capacity, 0, reactor_capacity)
+        reactor_production = np.clip(faction_reactor * reactor_capacity, 0, reactor_capacity)
 
         # --- Storage SOC ---
         soc = np.zeros(self.n_time)
         max_power = n_storage * module_power_mw
         max_energy = n_storage * module_capacity_mwh
-        soc[0] = 0.3 * max_energy
+        soc[0] = 0.3 * max_energy  # start at 30%
         ch_list = []
         dis_list = []
+
         for t in range(self.n_time):
             mismatch = reactor_production[t] - electric_demand[t]
             if mismatch > 0:
@@ -98,25 +99,40 @@ class SMRStorageEnv(gym.Env):
                 ch = 0.0
             ch_list.append(ch)
             dis_list.append(dis)
+
+            # Update SOC
             if t < self.n_time - 1:
-                soc[t+1] = np.clip(soc[t] * (1 - storage_leakage_per_hour) + ch - dis, 0, max_energy)
+                soc[t + 1] = np.clip(
+                    soc[t] * (1 - storage_leakage_per_hour) + ch - dis, 
+                    0, max_energy
+                )
+
+        # --- Enforce SOC to return to initial 30% at t=24 ---
+        final_soc = soc[0]
+        soc_diff = soc[-1] - final_soc
+        # Adjust the last timestep slightly
+        soc[-1] = final_soc
+        # Optionally, adjust net supply to account for small correction
+        if soc_diff > 0:
+            dis_list[-1] += soc_diff
+        else:
+            ch_list[-1] += -soc_diff
+        soc[-1] = np.clip(soc[-1], 0, max_energy)
+        ch_list[-1] = np.clip(ch_list[-1], 0, max_power)
+        dis_list[-1] = np.clip(dis_list[-1], 0, max_power)
 
         # --- Evaluate annual profit ---
         x = x_from_var(reactor_model, n_reactor, n_storage, reactor_production, soc)
         annual_profit = objective(x)
 
         # --- Compute net supply & mismatch ---
-        
-        net_supply = reactor_production + dis_list - ch_list
-        reactor_real_frac = np.clip((electric_demand-dis_list+ch_list)/(reactor_capacity),0,1)  # always 1
-        error = (reactor_real_frac -faction_reactor)**2
-
+        net_supply = reactor_production + np.array(dis_list) - np.array(ch_list)
+        reactor_real_frac = np.clip((electric_demand - np.array(dis_list) + np.array(ch_list)) / reactor_capacity, 0, 1)
+        error = (reactor_real_frac - faction_reactor) ** 2
         match_reward = np.sum(error)
-        #reward = -match_reward
 
-        # --- Final reward: combine profit, feasibility, and MSE ---
-        reward = (annual_profit)/ self.EPISODE_NORM -  match_reward
-        # Scale violation penalty to have meaningful impact
+        # --- Final reward ---
+        reward = annual_profit / self.EPISODE_NORM - match_reward
 
         obs = electric_demand / np.max(electric_demand)
         done = True
@@ -145,6 +161,62 @@ class RewardCallback(BaseCallback):
                 self.episode_rewards.append(info.get("reward", None))
                 self.episode_rewards_eur.append(info["annual_profit_eur"])
         return True
+
+
+def plot_result_old_style(
+        reactor_production, 
+        ch, 
+        dis, 
+        soc, 
+        net_supply, 
+        electric_demand, 
+        horizon,
+        algorithm_name="N/A",
+        duration=0.0,
+        settings_desc="",
+        profit=0.0
+    ):
+
+    # --- Ensure numpy arrays ---
+    reactor_production = np.asarray(reactor_production)
+    ch = np.asarray(ch)
+    dis = np.asarray(dis)
+    soc = np.asarray(soc)
+    net_supply = np.asarray(net_supply)
+    electric_demand = np.asarray(electric_demand)
+
+    hours = np.arange(horizon)
+
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+
+    # Main plots
+    ax1.plot(hours, electric_demand, 'k--', label='Demand', lw=2, zorder=5)
+    ax1.plot(hours, reactor_production, 'b-', label='Reactor', lw=2, alpha=0.85)
+    ax1.plot(hours, net_supply, 'm-', label='Net Supply', lw=1.6)
+
+    # Charge/discharge shading
+    ax1.fill_between(hours, 0, dis, color='red', alpha=0.3, label='Discharge')
+    ax1.fill_between(hours, 0, -ch, color='green', alpha=0.3, label='Charge')
+
+    ax1.set_ylabel("Power (MW)")
+    ax1.set_xlabel("Hour")
+
+    ax1.set_title(
+        f"Algo: {algorithm_name} ({settings_desc})\n"
+        f"Profit: EUR {profit:,.0f}/yr"
+    )
+
+    ax1.grid(True, alpha=0.3)
+    ax1.legend()
+
+    # SOC on second axis
+    ax2 = ax1.twinx()
+    ax2.plot(hours, soc, 'c.-', lw=1.5, label='SOC')
+    ax2.set_ylabel("SOC (MWh)", color='c')
+
+    plt.tight_layout()
+    plt.show()
+
 
 # ------------------------- Main training -------------------------------------
 if __name__ == "__main__":
@@ -216,16 +288,17 @@ if __name__ == "__main__":
 
     
     # --- Plot all flows ---
-    hours = np.arange(horizon)
-    fig, ax = plt.subplots(figsize=(10,5))
-    ax.plot(hours, electric_demand, "k--", label="Electric demand")
-    ax.plot(hours, reactor_production, "b-", label="Reactor output")
-    ax.plot(hours, dis, "r-", label="Storage discharge")
-    ax.plot(hours, ch, "g-", label="Storage charge")
-    ax.plot(hours, net_supply, "m-", label="Net supply to grid")
-    ax.set_xlabel("Hour")
-    ax.set_ylabel("Power (MW) / Energy (MWh)")
-    ax.set_title(f"Reactor & Storage Operation")
-    ax.legend(loc="upper left", fontsize="small", fancybox=False, framealpha=1.0, edgecolor="black")
-    ax.grid(True, ls=":", color="black")
-    plt.show()
+    plot_result_old_style(
+        reactor_production, 
+        ch, 
+        dis, 
+        soc, 
+        net_supply, 
+        electric_demand, 
+        horizon,
+        algorithm_name="Reinforcement Learning PPO",
+        duration=0.0,
+        settings_desc="30% SOC fixed",
+        profit=obj
+    )
+    
