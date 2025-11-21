@@ -9,8 +9,6 @@ from minlp_smr_battery_storage import objective, x_from_var, electric_demand, re
 
 # ------------------------- Problem data -------------------------------------
 horizon = 24
-n_reactor_options = [1,2,3]
-n_storage_options = [0,5,10,15]
 
 interest_rate = 0.04
 reactor_cap_a = 2.0e7
