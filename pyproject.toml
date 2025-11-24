@@ -10,6 +10,7 @@ dependencies = [
     "optuna>=3.5.0",
     "scikit-learn>=1.7.2",
     "scipy>=1.11.1",
+    "pandas>=2.3.3",
 ]
 
 [project.optional-dependencies]
